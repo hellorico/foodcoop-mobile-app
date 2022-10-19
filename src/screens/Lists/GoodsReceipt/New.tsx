@@ -70,7 +70,11 @@ export default class ListsGoodsReceiptNew extends React.Component<Props, State> 
     }
 
     componentDidMount(): void {
-        this.loadPurchaseOrdersFromOdoo();
+        try {
+            this.loadPurchaseOrdersFromOdoo();
+        } catch (error) {
+            console.error(error);
+        }
     }
 
     _handleLoadMore = (): void => {
@@ -80,7 +84,11 @@ export default class ListsGoodsReceiptNew extends React.Component<Props, State> 
                 loadingMore: true,
             }),
             () => {
-                this.loadPurchaseOrdersFromOdoo();
+                try {
+                    this.loadPurchaseOrdersFromOdoo();
+                } catch (error) {
+                    console.error(error);
+                }
             },
         );
     };
@@ -92,42 +100,52 @@ export default class ListsGoodsReceiptNew extends React.Component<Props, State> 
                 refreshing: true,
             },
             () => {
-                this.loadPurchaseOrdersFromOdoo();
+                try {
+                    this.loadPurchaseOrdersFromOdoo();
+                } catch (error) {
+                    console.error(error);
+                }
             },
         );
     };
 
     async loadPurchaseOrdersFromOdoo(): Promise<void> {
-        const purchaseOrders = await Odoo.getInstance().fetchWaitingPurchaseOrders(this.state.page);
-        const purchaseOrderList: PurchaseOrderList[] = [];
-        let previousTitle: string;
-        let data: PurchaseOrder[];
-        purchaseOrders.forEach((po, index, array) => {
-            const dateAsString = DateTime.fromJSDate(po.plannedDeliveryDate!).toFormat('cccc dd MMMM');
-            if (previousTitle !== dateAsString) {
-                if (previousTitle !== undefined) {
+        try {
+            const purchaseOrders = await Odoo.getInstance().fetchWaitingPurchaseOrders(this.state.page);
+            const purchaseOrderList: PurchaseOrderList[] = [];
+            let previousTitle: string;
+            let data: PurchaseOrder[];
+            purchaseOrders.forEach((po, index, array) => {
+                const dateAsString = DateTime.fromJSDate(po.plannedDeliveryDate!).toFormat('cccc dd MMMM');
+                if (previousTitle !== dateAsString) {
+                    if (previousTitle !== undefined) {
+                        purchaseOrderList.push({
+                            title: previousTitle,
+                            data: data,
+                        });
+                    }
+                    previousTitle = dateAsString;
+                    data = [];
+                }
+                data.push(po);
+                if (index === array.length - 1) {
                     purchaseOrderList.push({
                         title: previousTitle,
                         data: data,
                     });
                 }
-                previousTitle = dateAsString;
-                data = [];
-            }
-            data.push(po);
-            if (index === array.length - 1) {
-                purchaseOrderList.push({
-                    title: previousTitle,
-                    data: data,
-                });
-            }
-        });
-        this.setState({
-            waitingPurchaseOrders:
-                this.state.page === 1 ? purchaseOrderList : [...this.state.waitingPurchaseOrders, ...purchaseOrderList],
-            loading: false,
-            refreshing: false,
-        });
+            });
+            this.setState({
+                waitingPurchaseOrders:
+                    this.state.page === 1
+                        ? purchaseOrderList
+                        : [...this.state.waitingPurchaseOrders, ...purchaseOrderList],
+                loading: false,
+                refreshing: false,
+            });
+        } catch (error) {
+            Promise.reject(error);
+        }
     }
 
     navigationButtonPressed({buttonId}: {buttonId: string}): void {
@@ -155,73 +173,77 @@ export default class ListsGoodsReceiptNew extends React.Component<Props, State> 
             .save(goodsReceiptList);
         console.log(`goodsReceiptList saved with id ${savedList.id}`);
 
-        // Récupération des détails de chaque ligne du bon de commande via Odoo
-        const purchaseOrderLines = await Odoo.getInstance().fetchPurchaseOrderLinesForPurchaseOrder(props.item);
-        const goodsReceiptEntries: GoodsReceiptEntry[] = [];
-        purchaseOrderLines.forEach(poLine => {
-            if (undefined === poLine.productId) {
+        try {
+            // Récupération des détails de chaque ligne du bon de commande via Odoo
+            const purchaseOrderLines = await Odoo.getInstance().fetchPurchaseOrderLinesForPurchaseOrder(props.item);
+            const goodsReceiptEntries: GoodsReceiptEntry[] = [];
+            purchaseOrderLines.forEach(poLine => {
+                if (undefined === poLine.productId) {
+                    return;
+                }
+
+                const goodsReceiptEntry = new GoodsReceiptEntry();
+                goodsReceiptEntry.list = savedList;
+                goodsReceiptEntry.productName = poLine.name;
+                goodsReceiptEntry.productId = poLine.productId;
+                goodsReceiptEntry.packageQty = null;
+                goodsReceiptEntry.productQtyPackage = null;
+                goodsReceiptEntry.expectedPackageQty = poLine.packageQty ?? 0;
+                goodsReceiptEntry.expectedProductQtyPackage = poLine.productQtyPackage ?? 0;
+                goodsReceiptEntry.expectedProductQty = poLine.productQty ?? 0;
+                goodsReceiptEntry.expectedProductUom = poLine.productUom ?? 0;
+
+                goodsReceiptEntries.push(goodsReceiptEntry);
+            });
+
+            // Récupération des détails produit (name et barcode)
+            const productIds: number[] = goodsReceiptEntries
+                .map(entry => {
+                    return entry.productId!;
+                })
+                .filter(filterUnique);
+            const odooProducts = await Odoo.getInstance().fetchProductFromIds(productIds);
+            if (!odooProducts) {
                 return;
             }
 
-            const goodsReceiptEntry = new GoodsReceiptEntry();
-            goodsReceiptEntry.list = savedList;
-            goodsReceiptEntry.productName = poLine.name;
-            goodsReceiptEntry.productId = poLine.productId;
-            goodsReceiptEntry.packageQty = null;
-            goodsReceiptEntry.productQtyPackage = null;
-            goodsReceiptEntry.expectedPackageQty = poLine.packageQty ?? 0;
-            goodsReceiptEntry.expectedProductQtyPackage = poLine.productQtyPackage ?? 0;
-            goodsReceiptEntry.expectedProductQty = poLine.productQty ?? 0;
-            goodsReceiptEntry.expectedProductUom = poLine.productUom ?? 0;
+            // Récupération du supplierCode pour chaque produit
+            const supplierInfos = await Odoo.getInstance().fetchProductSupplierInfoFromProductTemplateIds(
+                odooProducts.map(p => (p.templateId ? p.templateId : 0)),
+                goodsReceiptList.partnerId,
+            );
+            if (!supplierInfos) {
+                return;
+            }
 
-            goodsReceiptEntries.push(goodsReceiptEntry);
-        });
+            // Ajout des détails produits (nom, barcode, supplierCode) dans chaque Entry
+            odooProducts.forEach(product => {
+                /**
+                 * We iterate on all entries instead of using productId because some lines can be the same product
+                 * exemple: Apples are the same for us (same productId) but different species (names) for the supplier
+                 */
+                goodsReceiptEntries.forEach(entry => {
+                    if (product.id === entry.productId) {
+                        entry.productName = product.name;
+                        entry.productBarcode = product.barcode;
 
-        // Récupération des détails produit (name et barcode)
-        const productIds: number[] = goodsReceiptEntries
-            .map(entry => {
-                return entry.productId!;
-            })
-            .filter(filterUnique);
-        const odooProducts = await Odoo.getInstance().fetchProductFromIds(productIds);
-        if (!odooProducts) {
-            return;
-        }
-
-        // Récupération du supplierCode pour chaque produit
-        const supplierInfos = await Odoo.getInstance().fetchProductSupplierInfoFromProductTemplateIds(
-            odooProducts.map(p => (p.templateId ? p.templateId : 0)),
-            goodsReceiptList.partnerId,
-        );
-        if (!supplierInfos) {
-            return;
-        }
-
-        // Ajout des détails produits (nom, barcode, supplierCode) dans chaque Entry
-        odooProducts.forEach(product => {
-            /**
-             * We iterate on all entries instead of using productId because some lines can be the same product
-             * exemple: Apples are the same for us (same productId) but different species (names) for the supplier
-             */
-            goodsReceiptEntries.forEach(entry => {
-                if (product.id === entry.productId) {
-                    entry.productName = product.name;
-                    entry.productBarcode = product.barcode;
-
-                    if (product.templateId) {
-                        const supplierCode = supplierInfos[product.templateId];
-                        entry.productSupplierCode = supplierCode === '' ? supplierCode : null;
+                        if (product.templateId) {
+                            const supplierCode = supplierInfos[product.templateId];
+                            entry.productSupplierCode = supplierCode === '' ? supplierCode : null;
+                        }
                     }
-                }
+                });
             });
-        });
 
-        // Sauvegarde en bdd de chaque Entry
-        await Database.sharedInstance()
-            .dataSource.getRepository(GoodsReceiptEntry)
-            .save(Object.values(goodsReceiptEntries));
+            // Sauvegarde en bdd de chaque Entry
+            await Database.sharedInstance()
+                .dataSource.getRepository(GoodsReceiptEntry)
+                .save(Object.values(goodsReceiptEntries));
 
-        Navigation.dismissModal(this.props.componentId);
+            Navigation.dismissModal(this.props.componentId);
+        } catch (error) {
+            Promise.reject(error);
+        }
     };
 
     renderLoadingModal(): React.ReactNode {

@@ -48,7 +48,6 @@ interface OdooApiPurchaseOrderLine {
 interface OdooApi {
     sid?: string;
     cookie?: string;
-    session_id?: string;
 
     connect(): Promise<OdooApiResponse>;
     search(model: string, params: object, context?: object): Promise<OdooApiResponse>;

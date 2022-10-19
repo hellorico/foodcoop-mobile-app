@@ -97,6 +97,7 @@ export default class ListsGoodsReceiptScan extends React.Component<Props, State>
         AppLogger.getLogger().debug(
             `Loading product #'${id}' from session #${this.props.list.id} (${this.props.list.purchaseOrderName})`,
         );
+
         Odoo.getInstance()
             .fetchProductFromIds([id])
             .then((products: ProductProduct[] | undefined) => {
@@ -108,7 +109,8 @@ export default class ListsGoodsReceiptScan extends React.Component<Props, State>
                 const product = products[0];
                 AppLogger.getLogger().debug(`Found Product #${id} => '${product.name}'`);
                 this.loadEntryFromProduct(product);
-            });
+            })
+            .catch(error => console.error(error));
     }
 
     loadEntryFromProduct(product: ProductProduct): void {

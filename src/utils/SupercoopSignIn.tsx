@@ -8,11 +8,21 @@ import React, {Component, ReactElement} from 'react';
 import Mailjet from './Mailjet';
 import Config from 'react-native-config';
 
+interface TokenInfo {
+    iss: string;
+    iat: number;
+    exp: number;
+    auth_time: number;
+    nonce: string;
+    at_hash: string;
+}
+
 interface User {
     email: string;
     sub: string;
     name: string;
     given_name: string;
+    picture: string;
 }
 
 interface SupercoopKey {
@@ -90,7 +100,7 @@ export default class SupercoopSignIn {
     }
 
     setCurrentUser(user?: User | undefined): void {
-        console.debug(user);
+        // console.debug(user);
         this.currentUser = user;
         if (undefined !== user) {
             Sentry.setUser({email: user.email});
@@ -103,20 +113,42 @@ export default class SupercoopSignIn {
 
     signInSilently = async (): Promise<void> => {
         const {refreshToken, idToken} = await this.getTokensFromSecureStorage();
-        let user = await this.getUserFromToken(idToken);
-        if (undefined === user) {
-            const result = await refresh(this.config, {refreshToken: refreshToken});
-            user = await this.getUserFromToken(result.idToken);
+        // refresh token if needed and save user
+        if (this.isTokenExpired(idToken)) {
+            console.debug('signInSilently isTokenExpired true');
+            // console.log(idToken);
+            let result: any = null;
+            try {
+                // console.debug(this.config);
+                result = await refresh(this.config, {refreshToken: refreshToken});
+            } catch (error) {
+                console.error(error);
+            }
+            if (result === null) {
+                return Promise.reject(result);
+            }
+
+            let user = await this.getUserFromToken(result.idToken);
             this.saveTokensFromResult(result);
             this.setCurrentUser(user);
-            return;
+            return Promise.resolve();
+        } else {
+            // save user if defined
+            let user = await this.getUserFromToken(idToken);
+            if (undefined === user) {
+                console.debug('reject(undefined user)');
+                return Promise.reject('undefined user');
+            } else {
+                this.setCurrentUser(user);
+                console.debug('setCurrentUser resolve');
+                return Promise.resolve();
+            }
         }
-        this.setCurrentUser(user);
     };
 
     signIn = async (): Promise<void> => {
         const result = await authorize(this.config);
-        console.debug(result);
+        // console.debug(result);
         const user = await this.getUserFromToken(result.idToken);
         this.saveTokensFromResult(result);
         this.setCurrentUser(user);
@@ -128,13 +160,30 @@ export default class SupercoopSignIn {
         await this.removeTokensFromSecureStorage();
     };
 
+    isTokenExpired = (token: string): boolean => {
+        const parsedToken: TokenInfo = JwtDecode<TokenInfo>(token);
+        let now: number = new Date().getTime() / 1000;
+        if (parsedToken?.exp === undefined || parsedToken?.exp < now) {
+            return true;
+        }
+        return false;
+    };
+
     async idTokenIsValid(token: string): Promise<boolean> {
         await this.fetchJwks();
         for (const pem of this.PEMs) {
+            // console.debug('');
+            // console.debug('token');
+            // console.debug(token);
+            // console.debug('pem');
+            // console.debug(pem);
+            // console.debug('');
             const isValid = KJUR.jws.JWS.verifyJWT(token, pem, {
                 alg: ['RS256'],
                 iss: [Config.OPENID_CONNECT_ISSUER],
             });
+            // console.debug(isValid);
+            // console.debug('');
             if (isValid === true) {
                 return true;
             }

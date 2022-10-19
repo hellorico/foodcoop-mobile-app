@@ -140,24 +140,30 @@ export default class ScannerInfoPanel extends React.Component<Props, State> {
     // }
 
     fetchProduct(barcode: string): void {
-        this.odoo.fetchProductFromBarcode(barcode).then(product => {
-            this.setState({product});
-            if (!product) {
-                return;
-            }
-            if (this.props.productFoundCallback) {
-                this.props.productFoundCallback(product);
-            }
-            this.odoo.fetchImageForProductProduct(product).then(image => {
-                if (!image) {
+        this.odoo
+            .fetchProductFromBarcode(barcode)
+            .then(product => {
+                this.setState({product});
+                if (!product) {
                     return;
                 }
-                product.image = ProductProduct.imageFromOdooBase64(image);
-                this.setState({
-                    product,
-                });
-            });
-        });
+                if (this.props.productFoundCallback) {
+                    this.props.productFoundCallback(product);
+                }
+                this.odoo
+                    .fetchImageForProductProduct(product)
+                    .then(image => {
+                        if (!image) {
+                            return;
+                        }
+                        product.image = ProductProduct.imageFromOdooBase64(image);
+                        this.setState({
+                            product,
+                        });
+                    })
+                    .catch(error => console.error(error));
+            })
+            .catch(error => console.error(error));
     }
 
     close(): void {

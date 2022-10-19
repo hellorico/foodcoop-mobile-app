@@ -6,7 +6,8 @@
     "author": "Arnaud de Mouhy <arnaud@admds.net>",
     "contributors": [
         "Vivien Poirier",
-        "Briac Pilpré"
+        "Briac Pilpré",
+        "Eric Morelle"
     ],
     "scripts": {
         "clean": "react-native-clean-project",
@@ -30,10 +31,11 @@
         "@types/react": "^17",
         "base64url": "^3.0.1",
         "deepmerge": "^4.2.2",
+        "fetch-intercept": "^2.4.0",
         "fuse.js": "^6.4.0",
         "install": "^0.13.0",
         "js-base64": "^3.6.0",
-        "jsrsasign": "^10.0.0",
+        "jsrsasign": "^10.5.27",
         "jwt-decode": "^3.0.0",
         "luxon": "^2.1.1",
         "moment": "^2.24.0",
@@ -88,7 +90,7 @@
         "@react-native-community/eslint-config": "^2.0.0",
         "@types/intl": "^1.2.0",
         "@types/jest": "^26.0.23",
-        "@types/jsrsasign": "^8.0.5",
+        "@types/jsrsasign": "^10.5.2",
         "@types/luxon": "^2.0.7",
         "@types/node": "*",
         "@types/papaparse": "^5.0.2",

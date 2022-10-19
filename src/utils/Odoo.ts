@@ -3,8 +3,9 @@
 import OdooApi from 'react-native-odoo-promise-based';
 import ProductProduct from '../entities/Odoo/ProductProduct';
 import ProductProductFactory from '../factories/Odoo/ProductProductFactory';
-import CookieManager from '@react-native-cookies/cookies';
-import {isInt, replaceStringAt, round} from './helpers';
+// import CookieManager from '@react-native-cookies/cookies';
+// import {isInt, replaceStringAt, round} from './helpers';
+import {replaceStringAt, round} from './helpers';
 import PurchaseOrder from '../entities/Odoo/PurchaseOrder';
 import PurchaseOrderFactory from '../factories/Odoo/PurchaseOrderFactory';
 import moment from 'moment';
@@ -13,6 +14,49 @@ import PurchaseOrderLineFactory from '../factories/Odoo/PurchaseOrderLineFactory
 import iconv from 'iconv-lite';
 import Dates from './Dates';
 import Config from 'react-native-config';
+import RNSecureStorage from 'rn-secure-storage';
+import fetchIntercept from 'fetch-intercept';
+import SupercoopSignIn from './SupercoopSignIn';
+
+let unregisterFetchIntercept: () => void;
+
+const registerFetchIntercept = async () => {
+    const refreshToken = await RNSecureStorage.get('refreshToken');
+    console.log('refreshToken = ' + refreshToken);
+    try {
+        await SupercoopSignIn.getInstance().signInSilently();
+    } catch (error) {
+        console.error(error);
+    }
+
+    console.log('SupercoopSignIn.getInstance().signInSilently();');
+    let idToken = await RNSecureStorage.get('idToken');
+    // if (idToken === null) idToken = '';
+
+    unregisterFetchIntercept = fetchIntercept.register({
+        request: function (url, config) {
+            // Modify the url or config here
+            config.headers = {...config.headers, 'X-Auth-Token': idToken};
+            // console.log('fetchIntercept Request');
+            // console.info(config);
+            return [url, config];
+        },
+        requestError: function (error) {
+            // Called when an error occured during another 'request' interceptor call
+            return Promise.reject(error);
+        },
+
+        response: function (response) {
+            // Modify the reponse object
+            return response;
+        },
+
+        responseError: function (error) {
+            // Handle an fetch error
+            return Promise.reject(error);
+        },
+    });
+};
 
 interface BarcodeRule {
     name: string;
@@ -73,14 +117,13 @@ export default class Odoo {
         this.isConnected = false;
         this.odooApi.sid = undefined;
         this.odooApi.cookie = undefined;
-        this.odooApi.session_id = undefined;
+        // this.odooApi.session_id = undefined;
     }
 
     assertApiResponse(response: OdooApiResponse): void {
-        //console.debug('assertApiResponse()');
-        //console.debug(response);
-        CookieManager.get(Odoo.odooEndpoint);
+        // CookieManager.get(Odoo.odooEndpoint);
         if (response.success) {
+            console.debug('assertApiResponse() success');
             return;
         }
         if (response.error.code === 100) {
@@ -89,7 +132,7 @@ export default class Odoo {
             console.error(JSON.stringify(response));
             throw new Error(JSON.stringify(response));
         }
-        throw new Error(JSON.stringify(response));
+        throw new Error(response.error);
     }
 
     async fetchBarcodeNomenclature(): Promise<void> {
@@ -100,19 +143,25 @@ export default class Odoo {
             offset: 0,
             order: 'sequence ASC',
         };
-        const response = await this.odooApi.search_read('barcode.rule', params);
-        console.log(JSON.stringify(response));
 
-        this.assertApiResponse(response);
-        if (response.data && response.data.length > 0) {
-            const rules = response.data as BarcodeRule[];
-            for (const rule of rules) {
-                let regexString = rule.pattern;
-                regexString = regexString.replace(/[{}]/g, '');
-                regexString = regexString.replace(/[ND]/g, '.');
-                rule.regex = new RegExp(`^${regexString}$`);
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('barcode.rule', params);
+            unregisterFetchIntercept();
+
+            this.assertApiResponse(response);
+            if (response.data && response.data.length > 0) {
+                const rules = response.data as BarcodeRule[];
+                for (const rule of rules) {
+                    let regexString = rule.pattern;
+                    regexString = regexString.replace(/[{}]/g, '');
+                    regexString = regexString.replace(/[ND]/g, '.');
+                    rule.regex = new RegExp(`^${regexString}$`);
+                }
+                Odoo.barcodeRules = rules;
             }
-            Odoo.barcodeRules = rules;
+        } catch (error) {
+            console.error(error);
         }
     }
 
@@ -235,14 +284,22 @@ export default class Odoo {
             offset: 0,
             order: 'date_planned DESC',
         };
-        const response = await this.odooApi.search_read('purchase.order', params);
-        this.assertApiResponse(response);
-        if (response.data && response.data.length > 0) {
-            const purchaseOrders: PurchaseOrder[] = [];
-            response.data.forEach((element: OdooApiPurchaseOrder) => {
-                purchaseOrders.push(PurchaseOrderFactory.PurchaseOrderFromResponse(element));
-            });
-            return purchaseOrders;
+
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('purchase.order', params);
+            unregisterFetchIntercept();
+
+            this.assertApiResponse(response);
+            if (response.data && response.data.length > 0) {
+                const purchaseOrders: PurchaseOrder[] = [];
+                response.data.forEach((element: OdooApiPurchaseOrder) => {
+                    purchaseOrders.push(PurchaseOrderFactory.PurchaseOrderFromResponse(element));
+                });
+                return purchaseOrders;
+            }
+        } catch (error) {
+            console.error(error);
         }
         return [];
     }
@@ -257,15 +314,21 @@ export default class Odoo {
             offset: 20 * (page - 1),
             order: 'date_planned DESC',
         };
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('purchase.order', params);
+            unregisterFetchIntercept();
 
-        const response = await this.odooApi.search_read('purchase.order', params);
-        this.assertApiResponse(response);
-        if (response.data && response.data.length > 0) {
-            const purchaseOrders: PurchaseOrder[] = [];
-            response.data.forEach((element: OdooApiPurchaseOrder) => {
-                purchaseOrders.push(PurchaseOrderFactory.PurchaseOrderFromResponse(element));
-            });
-            return purchaseOrders;
+            this.assertApiResponse(response);
+            if (response.data && response.data.length > 0) {
+                const purchaseOrders: PurchaseOrder[] = [];
+                response.data.forEach((element: OdooApiPurchaseOrder) => {
+                    purchaseOrders.push(PurchaseOrderFactory.PurchaseOrderFromResponse(element));
+                });
+                return purchaseOrders;
+            }
+        } catch (error) {
+            console.error(error);
         }
         return [];
     }
@@ -284,18 +347,24 @@ export default class Odoo {
             fields: ['product_tmpl_id', 'product_name', 'product_code'],
             offset: 0,
         };
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('product.supplierinfo', params);
+            unregisterFetchIntercept();
 
-        const response = await this.odooApi.search_read('product.supplierinfo', params);
-        this.assertApiResponse(response);
+            this.assertApiResponse(response);
 
-        const mapSupplierCode: {[productId: number]: string} = {};
-        if (response.data && response.data.length > 0) {
-            response.data.forEach((entry: OdooApiProductSupplierInfo) => {
-                if (entry.product_tmpl_id) {
-                    mapSupplierCode[entry.product_tmpl_id[0]] = entry.product_code ? entry.product_code : '';
-                }
-            });
-            return mapSupplierCode;
+            const mapSupplierCode: {[productId: number]: string} = {};
+            if (response.data && response.data.length > 0) {
+                response.data.forEach((entry: OdooApiProductSupplierInfo) => {
+                    if (entry.product_tmpl_id) {
+                        mapSupplierCode[entry.product_tmpl_id[0]] = entry.product_code ? entry.product_code : '';
+                    }
+                });
+                return mapSupplierCode;
+            }
+        } catch (error) {
+            console.error(error);
         }
         return undefined;
     }
@@ -309,11 +378,17 @@ export default class Odoo {
             limit: 1,
             offset: 0,
         };
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('purchase.order', params);
+            unregisterFetchIntercept();
 
-        const response = await this.odooApi.search_read('purchase.order', params);
-        this.assertApiResponse(response);
-        if (response.data && response.data.length > 0) {
-            return PurchaseOrderFactory.PurchaseOrderFromResponse(response.data[0]);
+            this.assertApiResponse(response);
+            if (response.data && response.data.length > 0) {
+                return PurchaseOrderFactory.PurchaseOrderFromResponse(response.data[0]);
+            }
+        } catch (error) {
+            console.error(error);
         }
         return undefined;
     }
@@ -330,20 +405,26 @@ export default class Odoo {
             fields: ['id', 'name', 'product_id', 'package_qty', 'product_qty_package', 'product_qty', 'product_uom'],
             offset: 0,
         };
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('purchase.order.line', params);
+            unregisterFetchIntercept();
 
-        const response = await this.odooApi.search_read('purchase.order.line', params);
-        this.assertApiResponse(response);
-        //console.debug('fetchPurchaseOrderLinesForPurchaseOrder');
-        if (response.data && response.data.length > 0) {
-            const purchaseOrderLines: PurchaseOrderLine[] = [];
-            response.data.forEach((element: OdooApiPurchaseOrderLine) => {
-                const purchaseOrderLine = PurchaseOrderLineFactory.PurchaseOrderLineFromResponse(element);
-                purchaseOrderLine.purchaseOrder = purchaseOrder;
+            this.assertApiResponse(response);
+            //console.debug('fetchPurchaseOrderLinesForPurchaseOrder');
+            if (response.data && response.data.length > 0) {
+                const purchaseOrderLines: PurchaseOrderLine[] = [];
+                response.data.forEach((element: OdooApiPurchaseOrderLine) => {
+                    const purchaseOrderLine = PurchaseOrderLineFactory.PurchaseOrderLineFromResponse(element);
+                    purchaseOrderLine.purchaseOrder = purchaseOrder;
 
-                purchaseOrderLines.push(purchaseOrderLine);
-            });
-            purchaseOrder.purchaseOrderLines = purchaseOrderLines;
-            return purchaseOrderLines;
+                    purchaseOrderLines.push(purchaseOrderLine);
+                });
+                purchaseOrder.purchaseOrderLines = purchaseOrderLines;
+                return purchaseOrderLines;
+            }
+        } catch (error) {
+            console.error(error);
         }
         return [];
     }
@@ -363,14 +444,21 @@ export default class Odoo {
 
         //console.debug('[Odoo] search_read(product.product) with params:');
         //console.debug(params);
-        const response = await this.odooApi.get('product.product', params);
-        this.assertApiResponse(response);
-        const products: ProductProduct[] = [];
-        if (response.data && response.data.length > 0) {
-            response.data.forEach((element: OdooApiProductProduct) => {
-                products.push(ProductProductFactory.ProductProductFromResponse(element));
-            });
-            return products;
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.get('product.product', params);
+            unregisterFetchIntercept();
+
+            this.assertApiResponse(response);
+            const products: ProductProduct[] = [];
+            if (response.data && response.data.length > 0) {
+                response.data.forEach((element: OdooApiProductProduct) => {
+                    products.push(ProductProductFactory.ProductProductFromResponse(element));
+                });
+                return products;
+            }
+        } catch (error) {
+            console.error(error);
         }
         return undefined;
     }
@@ -399,21 +487,31 @@ export default class Odoo {
 
         //console.debug('[Odoo] search_read(product.product) with params:');
         //console.debug(params);
-        const response = await this.odooApi.search_read('product.product', params);
-        this.assertApiResponse(response);
-        if (response.data && response.data.length > 0) {
-            const product = ProductProductFactory.ProductProductFromResponse(response.data[0]);
-            if (parsedBarcode.weight && product.weightNet && product.lstPrice) {
-                const ratio = parsedBarcode.weight / product.weightNet;
-                product.weightNet = parsedBarcode.weight;
-                product.lstPrice = round(product.lstPrice * ratio, 2);
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('product.product', params);
+            unregisterFetchIntercept();
+
+            console.debug('fetchProductFromBarcode');
+            console.debug(response);
+
+            this.assertApiResponse(response);
+            if (response.data && response.data.length > 0) {
+                const product = ProductProductFactory.ProductProductFromResponse(response.data[0]);
+                if (parsedBarcode.weight && product.weightNet && product.lstPrice) {
+                    const ratio = parsedBarcode.weight / product.weightNet;
+                    product.weightNet = parsedBarcode.weight;
+                    product.lstPrice = round(product.lstPrice * ratio, 2);
+                }
+                if (parsedBarcode.price && product.lstPrice && product.weightNet) {
+                    const ratio = parsedBarcode.price / product.lstPrice;
+                    product.lstPrice = parsedBarcode.price;
+                    product.weightNet = round(product.weightNet * ratio, 3);
+                }
+                return product;
             }
-            if (parsedBarcode.price && product.lstPrice && product.weightNet) {
-                const ratio = parsedBarcode.price / product.lstPrice;
-                product.lstPrice = parsedBarcode.price;
-                product.weightNet = round(product.weightNet * ratio, 3);
-            }
-            return product;
+        } catch (error) {
+            console.error(error);
         }
         return null;
     }
@@ -430,45 +528,58 @@ export default class Odoo {
             limit: 1,
             offset: 0,
         };
+        try {
+            await registerFetchIntercept();
+            const response = await this.odooApi.search_read('product.product', params);
+            unregisterFetchIntercept();
 
-        const response = await this.odooApi.search_read('product.product', params);
-        this.assertApiResponse(response);
+            this.assertApiResponse(response);
 
-        return response.data && response.data.length > 0 ? response.data[0].image : null;
+            return response.data && response.data.length > 0 ? response.data[0].image : null;
+        } catch (error) {
+            console.error(error);
+        }
+        return null;
     }
 
     assertConnect = async (): Promise<boolean> => {
+        return true;
         //console.debug('[Odoo] assertConnect()');
-        return new Promise<boolean>((resolve, reject) => {
-            if (!this.isConnected) {
-                //console.debug('[Odoo] not connected, connecting...');
-                this.odooApi
-                    .connect()
-                    .then(response => {
-                        this.assertApiResponse(response);
-                        if (response.data && isInt(response.data.uid) && response.data.uid > 0) {
-                            //console.debug('[Odoo] connection ok');
-                            this.isConnected = true;
-                            resolve(true);
-                        } else {
-                            console.error('[Odoo] connection ko');
-                            this.isConnected = false;
-                            console.error(response);
-                            reject(false);
-                        }
-                    })
-                    .catch(reason => {
-                        console.error('[Odoo] odoo connect failed');
-                        reject(reason);
-                    });
-            } else {
-                //console.debug('[Odoo] already connected');
-                resolve(true);
-            }
-        }).catch(e => {
-            console.error(e);
-            return false;
-        });
+        // await registerFetchIntercept();
+        // return new Promise<boolean>((resolve, reject) => {
+        //     if (!this.isConnected) {
+        //         //console.debug('[Odoo] not connected, connecting...');
+        //         this.odooApi
+        //             .connect()
+        //             .then(response => {
+        //                 // unregisterFetchIntercept();
+        //                 this.assertApiResponse(response);
+        //                 if (response.data && isInt(response.data.uid) && response.data.uid > 0) {
+        //                     //console.debug('[Odoo] connection ok');
+        //                     this.isConnected = true;
+        //                     resolve(true);
+        //                 } else {
+        //                     console.error('[Odoo] connection ko');
+        //                     this.isConnected = false;
+        //                     console.error(response);
+        //                     reject(false);
+        //                 }
+        //             })
+        //             .catch(reason => {
+        //                 console.error('[Odoo] odoo connect failed');
+        //                 // unregisterFetchIntercept();
+        //                 reject(reason);
+        //             });
+        //     } else {
+        //         //console.debug('[Odoo] already connected');
+        //         // unregisterFetchIntercept();
+        //         resolve(true);
+        //     }
+        // }).catch(e => {
+        //     console.error(e);
+        //     // unregisterFetchIntercept();
+        //     return false;
+        // });
     };
 
     iso88591ToUtf8(data: string): string {

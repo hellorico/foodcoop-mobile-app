@@ -621,7 +621,8 @@ export default class CodeScanner extends React.Component<Props, State> {
                     Alert.alert('Erreur', `Une erreur est survenue ("${reason}"). Merci de réessayer.`);
                     this.reset();
                 },
-            );
+            )
+            .catch(error => console.error(error));
     }
 
     handleNotFoundProductProduct(_barcode: Barcode): void {

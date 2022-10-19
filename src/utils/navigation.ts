@@ -21,11 +21,16 @@ function loadBadges(): void {
                     badge: purchaseOrders.length.toString(),
                 },
             });
-        });
+        })
+        .catch(error => console.error(error));
 }
 
 export function goHome(): void {
-    Odoo.getInstance().fetchBarcodeNomenclature();
+    try {
+        Odoo.getInstance().fetchBarcodeNomenclature();
+    } catch (error) {
+        console.log(error);
+    }
 
     Navigation.setDefaultOptions({
         bottomTab: {

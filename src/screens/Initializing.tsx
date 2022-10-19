@@ -52,7 +52,11 @@ export default class Initializing extends React.Component<Props> {
 
     componentDidMount(): void {
         Database.sharedInstance(); // Init database
-        this.signInSilently();
+        try {
+            this.signInSilently();
+        } catch (error) {
+            console.log(error);
+        }
     }
 
     signInSilently(): void {
@@ -67,7 +71,8 @@ export default class Initializing extends React.Component<Props> {
                     console.debug('Going to authentication screen.');
                     goToAuth();
                 },
-            );
+            )
+            .catch(error => console.error(error));
     }
 
     render(): React.ReactNode {
